@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reporting Service – Dashboard</title>
+<style>
+  :root { --bg:#f4f6fa; --card:#fff; --text:#1f2937; --muted:#6b7280; --line:#e5e7eb; --primary:#2563eb; --green:#16a34a; --red:#dc2626; --amber:#d97706; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f172a; --card:#1e293b; --text:#e5e7eb; --muted:#94a3b8; --line:#334155; --primary:#60a5fa; --green:#4ade80; --red:#f87171; --amber:#fbbf24; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, "Segoe UI", Roboto, Arial, sans-serif; background:var(--bg); color:var(--text); }
+  header { background:var(--primary); color:#fff; padding:16px 24px; display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; }
+  header h1 { margin:0; font-size:20px; }
+  header .tools { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  header input { padding:8px 10px; border-radius:6px; border:0; min-width:220px; }
+  main { max-width:1100px; margin:0 auto; padding:20px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-bottom:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .card .label { color:var(--muted); font-size:13px; }
+  .card .value { font-size:26px; font-weight:700; margin-top:6px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:20px; }
+  section h2 { margin:0 0 12px; font-size:17px; }
+  .scroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { padding:9px 10px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th:first-child, td:first-child { text-align:left; }
+  th { color:var(--muted); font-weight:600; }
+  tr.detail td { background:var(--bg); text-align:left; white-space:normal; }
+  .pos { color:var(--green); font-weight:600; } .neg { color:var(--red); font-weight:600; }
+  button { cursor:pointer; border:0; border-radius:6px; padding:7px 12px; font-size:13px; background:var(--primary); color:#fff; }
+  button.light { background:transparent; color:var(--primary); border:1px solid var(--primary); }
+  button.danger { background:var(--red); }
+  header button { background:#fff; color:var(--primary); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .row input { padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--text); width:160px; }
+  #msg { margin-top:10px; font-size:14px; min-height:20px; }
+  .ok { color:var(--green); } .err { color:var(--red); }
+  .empty { color:var(--muted); padding:10px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📊 Reporting Service – Dashboard</h1>
+  <div class="tools">
+    <input id="token" placeholder="Token (Bearer)" value="demo-token">
+    <button id="reload">Tải lại</button>
+  </div>
+</header>
+
+<main>
+  <div class="cards">
+    <div class="card"><div class="label">Số đơn đã báo cáo</div><div class="value" id="c-orders">–</div></div>
+    <div class="card"><div class="label">Tổng doanh thu</div><div class="value" id="c-rev">–</div></div>
+    <div class="card"><div class="label">Tổng chi phí</div><div class="value" id="c-cost">–</div></div>
+    <div class="card"><div class="label">Tổng lợi nhuận</div><div class="value pos" id="c-profit">–</div></div>
+  </div>
+
+  <section>
+    <h2>Tạo báo cáo đơn hàng mới</h2>
+    <div class="row">
+      <input id="order-id" type="number" min="1" placeholder="Mã đơn hàng (order_id)">
+      <button id="create">Tạo báo cáo</button>
+    </div>
+    <div id="msg"></div>
+  </section>
+
+  <section>
+    <h2>Thống kê theo sản phẩm (số lượng bán, doanh thu, chi phí, lợi nhuận, tồn kho)</h2>
+    <div class="scroll"><table id="t-summary"></table></div>
+  </section>
+
+  <section>
+    <h2>Báo cáo theo đơn hàng</h2>
+    <div class="scroll"><table id="t-orders"></table></div>
+  </section>
+
+  <section>
+    <h2>Báo cáo theo sản phẩm</h2>
+    <div class="scroll"><table id="t-products"></table></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const money = (n) => Number(n ?? 0).toLocaleString('vi-VN');
+const cls = (n) => (Number(n) >= 0 ? 'pos' : 'neg');
+
+try { const t = localStorage.getItem('rs_token'); if (t) $('token').value = t; } catch (e) {}
+
+async function api(method, path, body) {
+  const token = $('token').value.trim();
+  try { localStorage.setItem('rs_token', token); } catch (e) {}
+  const res = await fetch('/reports' + path, {
+    method,
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || ('Lỗi ' + res.status));
+  return data;
+}
+
+function say(text, ok) { const m = $('msg'); m.textContent = text; m.className = ok ? 'ok' : 'err'; }
+
+function renderTable(id, headers, rows) {
+  const t = $(id);
+  t.textContent = '';
+  if (!rows.length) { const d = document.createElement('div'); d.className = 'empty'; d.textContent = 'Chưa có dữ liệu.'; t.replaceWith(Object.assign(d, { id })); return; }
+  if (t.tagName !== 'TABLE') return;
+  const thead = t.createTHead().insertRow();
+  headers.forEach((h) => { const th = document.createElement('th'); th.textContent = h; thead.appendChild(th); });
+  const tb = t.createTBody();
+  rows.forEach((r) => tb.appendChild(r));
+}
+
+function makeRow(cells, actions) {
+  const tr = document.createElement('tr');
+  cells.forEach((c) => {
+    const td = document.createElement('td');
+    if (c && typeof c === 'object') { td.textContent = c.text; if (c.cls) td.className = c.cls; }
+    else td.textContent = c;
+    tr.appendChild(td);
+  });
+  if (actions) { const td = document.createElement('td'); actions.forEach((a) => td.appendChild(a)); tr.appendChild(td); }
+  return tr;
+}
+
+function btn(label, kind, fn) {
+  const b = document.createElement('button');
+  b.textContent = label; if (kind) b.className = kind; b.style.marginLeft = '6px';
+  b.onclick = fn; return b;
+}
+
+// Khôi phục lại phần tử bảng nếu trước đó bị thay bằng thông báo "chưa có dữ liệu"
+function ensureTables() {
+  ['t-summary', 't-orders', 't-products'].forEach((id) => {
+    const el = $(id);
+    if (el.tagName !== 'TABLE') { const t = document.createElement('table'); t.id = id; el.replaceWith(t); }
+  });
+}
+
+async function load() {
+  ensureTables();
+  try {
+    const [summary, orders, products] = await Promise.all([api('GET', '/summary'), api('GET', '/orders'), api('GET', '/products')]);
+
+    $('c-orders').textContent = money(summary.totals.total_orders);
+    $('c-rev').textContent = money(summary.totals.total_revenue);
+    $('c-cost').textContent = money(summary.totals.total_cost);
+    $('c-profit').textContent = money(summary.totals.total_profit);
+    $('c-profit').className = 'value ' + cls(summary.totals.total_profit);
+
+    renderTable('t-summary', ['Mã SP', 'Đã bán', 'Doanh thu', 'Chi phí', 'Lợi nhuận', 'Tồn kho'],
+      summary.by_product.map((p) => makeRow([
+        p.product_id, money(p.total_sold), money(p.revenue), money(p.cost),
+        { text: money(p.profit), cls: cls(p.profit) }, p.stock_remaining ?? '–',
+      ])));
+
+    ensureTables();
+    renderTable('t-orders', ['Mã báo cáo', 'Mã đơn hàng', 'Doanh thu', 'Chi phí', 'Lợi nhuận', 'Ngày tạo', ''],
+      orders.map((o) => {
+        const tr = makeRow([
+          o.id, o.order_id, money(o.total_revenue), money(o.total_cost),
+          { text: money(o.total_profit), cls: cls(o.total_profit) }, new Date(o.created_at).toLocaleString('vi-VN'),
+        ], [
+          btn('Chi tiết', 'light', () => toggleDetail(tr, o.id)),
+          btn('Xóa', 'danger', () => remove('/orders/' + o.id, 'báo cáo đơn hàng #' + o.id)),
+        ]);
+        return tr;
+      }));
+
+    ensureTables();
+    renderTable('t-products', ['Mã báo cáo', 'Mã BC đơn', 'Mã SP', 'Đã bán', 'Doanh thu', 'Chi phí', 'Lợi nhuận', 'Tồn kho', ''],
+      products.map((p) => makeRow([
+        p.id, p.order_report_id, p.product_id, money(p.total_sold), money(p.revenue), money(p.cost),
+        { text: money(p.profit), cls: cls(p.profit) }, p.stock_remaining ?? '–',
+      ], [btn('Xóa', 'danger', () => remove('/products/' + p.id, 'báo cáo sản phẩm #' + p.id))])));
+  } catch (e) { say(e.message, false); }
+}
+
+async function toggleDetail(tr, id) {
+  const next = tr.nextElementSibling;
+  if (next && next.classList.contains('detail')) { next.remove(); return; }
+  try {
+    const d = await api('GET', '/orders/' + id);
+    const dr = document.createElement('tr'); dr.className = 'detail';
+    const td = document.createElement('td'); td.colSpan = 7;
+    td.textContent = 'Sản phẩm trong đơn: ' + d.products.map((p) =>
+      `SP#${p.product_id} (bán ${p.total_sold}, doanh thu ${money(p.revenue)}, chi phí ${money(p.cost)}, lợi nhuận ${money(p.profit)})`).join(' | ');
+    dr.appendChild(td); tr.after(dr);
+  } catch (e) { say(e.message, false); }
+}
+
+async function remove(path, label) {
+  if (!confirm('Xóa ' + label + '?')) return;
+  try { await api('DELETE', path); say('Đã xóa ' + label, true); load(); } catch (e) { say(e.message, false); }
+}
+
+$('create').onclick = async () => {
+  const id = Number($('order-id').value);
+  if (!id) return say('Hãy nhập mã đơn hàng', false);
+  try {
+    const r = await api('POST', '/orders', { order_id: id });
+    say(`Đã tạo báo cáo #${r.id} cho đơn ${id}: lợi nhuận ${money(r.total_profit)}`, true);
+    $('order-id').value = ''; load();
+  } catch (e) { say(e.message, false); }
+};
+$('reload').onclick = load;
+load();
+</script>
+</body>
+</html>
